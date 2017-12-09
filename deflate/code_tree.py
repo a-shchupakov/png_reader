@@ -10,13 +10,13 @@ class CodeTree:
             raise ValueError
         for code in code_lengths:
             if code < 0:
-                raise ValueError
+                raise ValueError('Illegal code length')
 
         # Convert code lengths to code tree
         nodes = []
         for i in range(15, -1, -1):  # Descend through code lengths (maximum 15 for DEFLATE)
             if len(nodes) % 2 != 0:
-                raise ValueError
+                raise ValueError('This canonical code does not represent a Huffman code tree')
             new_nodes = []
             if i > 0:
                 for j in range(0, len(code_lengths)):
