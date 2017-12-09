@@ -1,6 +1,6 @@
 import io
-from code_tree import CodeTree, Leaf
-from bit_input_stream import BitInputStream as IO_Stream
+import code_tree
+from bit_input_stream import BitInputStream
 
 ONE_BIT = 1
 TWO_BITS = 2
@@ -31,17 +31,18 @@ class Buffer:
 
 
 class Deflate:
-    def __init__(self, input_stream):
+    def __init__(self):
         self.fixed_literal_length_table = None
         self.fixed_distance_table = None
         self.dynamic_literal_length_table = None
         self.dynamic_distance_table = None
-        self.input = input_stream
+        self.input = None
         self.output = io.BytesIO()
         self.buffer = Buffer(2 ** 15)
         self.__build_static_tables()
 
-    def decompress(self):
+    def decompress(self, input_stream):
+        self.input = input_stream
         while True:
             b_final = self.input.read() == 1
             b_type = self.input.read_bits(2)
@@ -63,10 +64,10 @@ class Deflate:
 
     def __build_static_tables(self):
         code_table = [8] * 144 + [9] * (256 - 144) + [7] * (280 - 256) + [8] * (288 - 280)
-        self.fixed_literal_length_table = CodeTree(code_table)
+        self.fixed_literal_length_table = code_tree.CodeTree(code_table)
 
         dist_table = [5] * 32
-        self.fixed_distance_table = CodeTree(dist_table)
+        self.fixed_distance_table = code_tree.CodeTree(dist_table)
 
     def __build_dynamic_tables(self):
         hlit = self.input.read_bits(FIVE_BITS) + 257
@@ -80,11 +81,11 @@ class Deflate:
         temp_code_lengths[0] = self.input.read_bits(THREE_BITS)
         for i in range(0, hclen - 4):
             if i % 2 == 0:
-                temp_code_lengths[8 + i / 2] = self.input.read_bits(THREE_BITS)
+                temp_code_lengths[8 + i // 2] = self.input.read_bits(THREE_BITS)
             else:
-                temp_code_lengths[7 - i / 2] = self.input.read_bits(THREE_BITS)
+                temp_code_lengths[7 - i // 2] = self.input.read_bits(THREE_BITS)
 
-        code_length_table = CodeTree(temp_code_lengths)
+        code_length_table = code_tree.CodeTree(temp_code_lengths)
 
         code_lengths = [0] * (hlit + hdist)
         temp_value = -1
@@ -92,8 +93,10 @@ class Deflate:
         index = 0
         while index < len(code_lengths):
             if temp_length > 0:
+                if temp_value == -1:
+                    raise ValueError('Impossible state')
                 code_lengths[index] = temp_value
-                temp_value -= 1
+                temp_length -= 1 
                 index += 1
             else:
                 symbol = self.__decode_literal(code_length_table)
@@ -101,20 +104,25 @@ class Deflate:
                     code_lengths[index], temp_value = symbol, symbol
                     index += 1
                 elif symbol == 16:
+                    if temp_value == -1:
+                        raise ValueError('Impossible state')
                     temp_length = self.input.read_bits(TWO_BITS) + 3
                 elif symbol == 17:
                     temp_value, temp_length = 0, self.input.read_bits(THREE_BITS) + 3
                 elif symbol == 18:
                     temp_value, temp_length = 0, self.input.read_bits(SEVEN_BITS) + 11
 
+        if temp_length > 0:
+            raise ValueError('Run exceeds number of codes')
+
         literal_length_table_length = code_lengths[:hlit]
-        self.dynamic_literal_length_table = CodeTree(literal_length_table_length)
+        self.dynamic_literal_length_table = code_tree.CodeTree(literal_length_table_length)
 
         distance_table_length = code_lengths[hlit:]
         if len(distance_table_length) == 1 and distance_table_length[0] == 0:
             self.dynamic_distance_table = None
         else:
-            one_temp_count, second_temp_count = 0
+            one_temp_count, second_temp_count = 0, 0
             for x in distance_table_length:
                 if x == 1:
                     one_temp_count += 1
@@ -122,10 +130,11 @@ class Deflate:
                     second_temp_count += 1
 
             if one_temp_count == 1 and second_temp_count == 0:
-                distance_table_length = distance_table_length[:32]
+                if len(distance_table_length) < 32:
+                	distance_table_length = distance_table_length + [0] * (32 - len(distance_table_length))
                 distance_table_length[31] = 1
 
-            self.dynamic_distance_table = CodeTree(distance_table_length)
+            self.dynamic_distance_table = code_tree.CodeTree(distance_table_length)
 
     def __decompress_uncompressed_data(self):
         while self.input.get_bit_position() != 0:
@@ -133,6 +142,9 @@ class Deflate:
 
         len = self.input.read_bits(SIXTEEN_BITS)
         nlen = self.input.read_bits(SIXTEEN_BITS)
+
+        if (len ^ 0xFFFF) != nlen:
+            raise ValueError('Invalid length in uncompressed block')
 
         for i in range(0, len):
             byte = self.input.read_byte()
@@ -150,9 +162,14 @@ class Deflate:
                 self.buffer.append(symbol)
             else:  # symbol is length-distance pair
                 length = self.__decode_length(symbol)
-
+                if length < 3 or length > 258:
+                    raise ValueError('Invalid run length')
+                if not distance_table:
+                    raise ValueError('Length symbol encountered with empty distance code')
                 distance_byte = self.__decode_literal(distance_table)
                 distance = self.__decode_distance(distance_byte)
+                if distance < 1 or distance > 2 ** 15:
+                    raise ValueError('Invalid distance')
 
                 self.buffer.copy(length, distance, self.output)
 
@@ -168,14 +185,14 @@ class Deflate:
             else:
                 raise ValueError
 
-            if isinstance(next_node, Leaf):
+            if isinstance(next_node, code_tree.Leaf):
                 return next_node.symbol
 
             current_node = next_node
 
     def __decode_length(self, symbol):
         if symbol < 257 or symbol > 287:
-            raise RuntimeError('Invalid length value')
+            raise ValueError('Invalid length value')
         elif symbol <= 264:
             return symbol - 254
         elif symbol <= 284:
@@ -184,31 +201,30 @@ class Deflate:
         elif symbol == 285:
             return 258
         else:
-            raise RuntimeError('Invalid length value')
+            raise ValueError('Invalid length value')
 
     def __decode_distance(self, symbol):
         if symbol < 0 or symbol > 31:
-            raise RuntimeError
+            raise ValueError('Invalid distance symbol')
         if symbol <= 3:
             return symbol + 1
         elif symbol <= 29:
             extra_bits = symbol // 2 - 1
             return ((symbol % 2 + 2) << extra_bits) + 1 + self.input.read_bits(extra_bits)
         else:
-            raise RuntimeError
+            raise ValueError('Reserved distance symbol')
 
 
 def main():
     data = b'\x73\x49\x4D\xCB\x49\x2C\x49\x55\x00\x11\x00'
     stream = io.BytesIO(data)
-    bit_input_stream = IO_Stream(stream)
+    bit_input_stream = BitInputStream(stream)
 
     deflate = Deflate(bit_input_stream)
     output_stream = deflate.decompress()
 
     output_stream.seek(0)
     print(output_stream.read())
-
 
 
 if __name__ == '__main__':
