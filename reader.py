@@ -60,12 +60,13 @@ class Picture:
         self.compression_method = None
         self.filter_method = None
         self.interlace_method = None
-        self.background_color = None  # grayscale stores as (gray, gray, gray)
+        self.background_color = None  # grayscale stores as RGB(gray, gray, gray)
         self.gamma = None
         self.text_info = None
         self.last_modification_time = None
         self.fully_transparent_color = None  # that color indicates fully transparent pixel (tRNS chunk)
         self.chunks = []
+        self._chunks_set = set()
         self.palette = None
         self.__analyze_chunks(chunks)
         self._gap = GAP_MAP[(self.type_of_pixel, self.alpha_channel, self.bit_depth)]
@@ -95,16 +96,25 @@ class Picture:
             if new_chunk.unknown:
                 continue
             self.chunks.append(new_chunk)
+            self._chunks_set.add(new_chunk.name)
 
         self.__read_IHDR()
-        self.__read_PLTE()
-        self.__read_bKGD()
-        self.__read_gAMA()
-        self.__read_tEXt()
-        self.__read_tIME()
-        self.__read_tRNS()
-        self.__read_zTXt()
-        self.__read_iTXt()
+        if b'PLTE' in self._chunks_set:
+            self.__read_PLTE()
+        if b'bKGD' in self._chunks_set:
+            self.__read_bKGD()
+        if b'gAMA' in self._chunks_set:
+            self.__read_gAMA()
+        if b'tEXt' in self._chunks_set:
+            self.__read_tEXt()
+        if b'tIME' in self._chunks_set:
+            self.__read_tIME()
+        if b'tRNS' in self._chunks_set:
+            self.__read_tRNS()
+        if b'zTXt' in self._chunks_set:
+            self.__read_zTXt()
+        if b'iTXt' in self._chunks_set:
+            self.__read_iTXt()
 
     def __check_chunk_order(self, chunks):
         # TODO: http://www.libpng.org/pub/png/spec/1.2/PNG-Chunks.html#C.Summary-of-standard-chunks
@@ -209,7 +219,7 @@ class Picture:
 
         if faced != 1 or plte_chunk is None:
             raise ValueError('There must be 1 PLTE chunk in indexed-color image')
-        if not (plte_chunk.length <= 2 ** self.bit_depth <= 2 ** 8) or plte_chunk.length % 3:
+        if not (plte_chunk.length // 3 <= 2 ** self.bit_depth <= 2 ** 8) or plte_chunk.length % 3:
             raise ValueError('Illegal PLTE chunk data')
 
         self.palette = []
@@ -243,13 +253,13 @@ class Picture:
         for chunk in self.chunks:
             if chunk.name == b'tEXt':
                 text_chunks.append(chunk)
-        self.text_info = ''
+        if self.text_info is None:
+            self.text_info = ''
 
         for text_chunk in text_chunks:
             null_index = text_chunk.data.index(0)
             keyword, text = text_chunk.data[0:null_index].decode(), text_chunk.data[null_index+1:].decode()
             self.text_info += '{}: {}\n'.format(keyword, text)
-        self.text_info = self.text_info[:-1]
 
     @chunk_wrapper(False)
     def __read_tIME(self):
@@ -292,7 +302,7 @@ class Picture:
             self.text_info = ''
 
         for chunk in text_chunks:
-            null_index = text_chunk.data.index(0)
+            null_index = chunk.data.index(0)
             keyword = chunk.data[0:null_index].decode()
             compression_method = chunk.data[null_index+1]
             if compression_method != 0:
@@ -307,7 +317,6 @@ class Picture:
             text = output_stream.read().decode()
 
             self.text_info += '{}: {}\n'.format(keyword, text)
-        self.text_info = self.text_info[:-1]
 
     @chunk_wrapper(False)
     def __read_iTXt(self):
@@ -319,13 +328,13 @@ class Picture:
             self.text_info = ''
 
         for chunk in text_chunks:
-            null_index_1 = text_chunk.data.index(0)
+            null_index_1 = chunk.data.index(0)
             keyword = chunk.data[0:null_index_1].decode(encoding='utf-8', errors='ignore')
             is_compressed, compression_method = chunk.data[null_index_1+1] == 1, chunk.data[null_index_1+2]
             if compression_method != 0:
                 raise ValueError('Unrecognized compression method')
 
-            null_index_2 = chunk.data[null_index_1+1:].index(0) + null_index_1 + 1
+            null_index_2 = chunk.data[null_index_1+3:].index(0) + null_index_1 + 3
             language_tag = chunk.data[null_index_1+3:null_index_2].decode(encoding='utf-8', errors='ignore')
 
             null_index_3 = chunk.data[null_index_2+1:].index(0) + null_index_2 + 1
@@ -343,11 +352,10 @@ class Picture:
             else:
                 text = raw_text.decode(encoding='utf-8', errors='ignore')
 
-            self.text_info += '{} (language: {}, keyword (translated): {}): {}\n'.format(keyword,
-                                                                                         language_tag,
-                                                                                         translated_keyword,
-                                                                                         text)
-        self.text_info = self.text_info[:-1]
+            self.text_info += '{} (language: {}, translated: {}): {}\n'.format(keyword,
+                                                                               language_tag,
+                                                                               translated_keyword,
+                                                                               text)
 
     def __find_first_chunk(self, chunk_name):
         for chunk in self.chunks:
