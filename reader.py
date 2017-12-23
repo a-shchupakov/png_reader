@@ -2,7 +2,6 @@ import os.path
 import binascii
 import io
 from itertools import repeat
-from PIL import Image
 from deflate import Deflate
 from bit_input_stream import BitInputStream
 
@@ -72,7 +71,7 @@ class Picture:
         self._gap = GAP_MAP[(self.type_of_pixel, self.alpha_channel, self.bit_depth)]
         self._pixel_map = [[] for _ in repeat(0, self.width)]
         self._temp_output_stream = self.__decode_idat_stream()
-        # self.__unfilter_image()
+        # self.__unfilter_image()  # todo: rewrite method to reverse effect of the filters
 
     def __str__(self):
         return 'Name: {}, {}x{}, Bit depth: {}, Sample depth: {}, Pixel type: {},\r\n' \
@@ -431,7 +430,7 @@ class Picture:
                 self._pixel_map[current_row].append(reverse_paeth(i))
             passed += 1
 
-            if passed == self.width:
+            if (passed / 3) == self.width:
                 filter_type, passed = None, 0
                 current_row += 1
                 continue
@@ -523,30 +522,10 @@ class Reader:
 
         return Picture(self.name, self.chunks)
 
-
-def get_pic(picture):  # todo: delete this
-    image = Image.new("RGB", (picture.width, picture.height), (0, 0, 0))
-    pixels = image.load()
-
-    colors = []
-    i = 0
-    while True:
-        try:
-            colors.append((picture._temp_output_stream[i], picture._temp_output_stream[i+1], picture._temp_output_stream[i+2]))
-            i += 3
-        except Exception:
-            break
-    for i in range(image.size[0]):
-        for j in range(image.size[1]):
-            pixels[i, j] = colors[j * image.size[0] + i]
-
-    image.show()
-
-
 def main():
     reader = Reader()
-    picture = reader.open('pics/h.png').get_picture()
-    # get_pic(picture)
+    picture = reader.open('pics/400x400.png').get_picture()
+    print()
 
 if __name__ == '__main__':
     main()
