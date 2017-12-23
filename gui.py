@@ -10,6 +10,7 @@ class ReaderWidget(QMainWindow):
     def __init__(self):
         super().__init__()
         self.picture = None
+        self.picture_path = None
         self.picture_widget = None
         self.central_widget = None
         self.initUI()
@@ -51,11 +52,11 @@ class ReaderWidget(QMainWindow):
         if fileName:
             try:
                 self.picture = reader.Reader().open(fileName).get_picture()
+                self.picture_path = fileName
             except TypeError:
                 error_dialog = QErrorMessage(self)
                 error_dialog.setWindowTitle('Error')
                 error_dialog.showMessage('File seems to be not in PNG format or file has been corrupted')
-                print('oh no!')
             self.display_picture()
 
     def display_picture(self):
@@ -64,7 +65,7 @@ class ReaderWidget(QMainWindow):
 
         self.hbox, self.vbox = QHBoxLayout(), QVBoxLayout()  # create layout
 
-        self.picture_widget = PictureWidget(self.picture, self)
+        self.picture_widget = PictureWidget(self.picture, self.picture_path, self)
 
         self.hbox.addStretch(1)
         self.hbox.addWidget(self.picture_widget)  # add picture on layout
@@ -111,6 +112,8 @@ class InfoWidget(QMainWindow):
         # self.text += 'Compression: {}\n'.format(self.picture.compression_method)
         # self.text += 'Filter: {}\n'.format(self.picture.filter_method)
         # self.text += 'Interlace: {}\n'.format(self.picture.interlace_method)
+        if self.picture.last_modification_time:
+            self.text += 'Last modification time: {}\n'.format(self.picture.last_modification_time)
         if self.picture.text_info:
             self.text += 'Integrated text: {}\n'.format(self.picture.text_info)
 
@@ -127,11 +130,12 @@ class InfoWidget(QMainWindow):
 
 
 class PictureWidget(QWidget):
-    def __init__(self, picture, parent=None):
+    def __init__(self, picture, path, parent=None):
         super().__init__(parent)
         self.qimage = None
         self.pixmap = None
         self.picture = picture
+        self.picture_path = path
         self.initUI()
 
     def initUI(self):
@@ -143,8 +147,10 @@ class PictureWidget(QWidget):
         # lbl.setPixmap(QPixmap.fromImage(self.qimage))  # create qpixmap from qimage
 
         hbox = QHBoxLayout(self)
-        self.pixmap = QPixmap(self.picture.width, self.picture.height)
-        self.pixmap.fill(QColor(0, 0, 0))
+        # пока что открываем картинку через PyQt5,
+        # т.к. нужно додумать как из байт сформировать пиксели (снять фильтрацию).
+        # все нужная информация о картинке прочитана и сохранена в picture.
+        self.pixmap = QPixmap(self.picture_path)
         lbl = QLabel(self)
         lbl.setPixmap(self.pixmap)
 
