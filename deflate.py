@@ -32,7 +32,7 @@ class Buffer:
 
 
 class Deflate:
-    def __init__(self):
+    def __init__(self, no_adler=False):
         self.fixed_literal_length_table = None
         self.fixed_distance_table = None
         self.dynamic_literal_length_table = None
@@ -40,6 +40,7 @@ class Deflate:
         self.input = None
         self.output = io.BytesIO()
         self.buffer = Buffer(2 ** 15)
+        self.no_adler = no_adler
         self.__build_static_tables()
 
     def decompress(self, input_stream):
@@ -59,6 +60,8 @@ class Deflate:
                 raise ValueError('Invalid compression type')
 
             if b_final:
+                if self.no_adler:
+                    break
                 self.__check_adler32()
                 break
 
