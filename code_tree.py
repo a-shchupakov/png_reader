@@ -63,13 +63,3 @@ class InternalNode:
     def __init__(self, left, right):
         self.left_child = left
         self.right_child = right
-
-
-def main():
-    lengths = [2, 2, 1, 0, 0, 0]
-    code_tree = CodeTree(lengths)
-    print(code_tree)
-
-
-if __name__ == '__main__':
-    main()
